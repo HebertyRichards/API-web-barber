@@ -22,5 +22,6 @@ class AgendamentoCreate(AgendamentoBase):
 
 class Agendamento(AgendamentoBase):
     id_agendamento: int 
+
     class Config:
         from_attributes = True

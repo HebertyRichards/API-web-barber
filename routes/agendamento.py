@@ -1,6 +1,6 @@
 import aiomysql
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from typing import List, Union
 
 from config.database import get_db_pool
 from config.email import send_email
@@ -16,7 +16,7 @@ def format_email_body(
     data_agendamento: str, 
     horario: str, 
     barbeiro: str, 
-    servico: List[str] | str, 
+    servico: Union[str, List[str]], 
     codigo: int
 ) -> str:
     
@@ -103,3 +103,63 @@ async def criar_agendamento(
             "message": "Agendamento criado com sucesso! Nenhum e-mail enviado porque o campo 'email' não foi preenchido.",
             "agendamento_id": new_id
         }
+
+def format_cancel_email_body(
+    nome_cliente: str, data_agendamento: str, horario: str, barbeiro: str, servicos: str
+) -> str:
+    lista_servicos_html = "".join([f"<li>{s.strip()}</li>" for s in servicos.split(',')])
+    mensagem = f"""
+        <h1>Agendamento Cancelado</h1>
+        <p>Olá {nome_cliente}, seu agendamento para o dia {data_agendamento} às {horario} com o barbeiro {barbeiro} foi cancelado com sucesso.</p>
+        <p>Serviço(s) que estava(m) agendado(s):</p>
+        <ul>{lista_servicos_html}</ul>
+        <p>Se você não solicitou este cancelamento ou tiver alguma dúvida, por favor, entre em contato conosco.</p>
+        <p>Atenciosamente, Barbearia Web Barber-Shop.</p>
+    """
+    return mensagem
+
+@agendamento_router.delete("/{id_agendamento}", status_code=status.HTTP_200_OK)
+async def cancelar_agendamento(
+    id_agendamento: int,
+    db_pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            sql_select = "SELECT * FROM agendamentos WHERE id_agendamento = %s"
+            await cursor.execute(sql_select, (id_agendamento,))
+            agendamento = await cursor.fetchone()
+
+            if not agendamento:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agendamento não encontrado.")
+            
+            sql_delete = "DELETE FROM agendamentos WHERE id_agendamento = %s"
+            await cursor.execute(sql_delete, (id_agendamento,))
+
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agendamento não encontrado para deleção.")
+
+    if agendamento.get("email"):
+        try:
+            data_formatada = agendamento["data_agendamento"].strftime('%d/%m/%Y')
+            hora_formatada = agendamento["horario"].strftime('%H:%M')
+            body = format_cancel_email_body(
+                nome_cliente=agendamento["nome_cliente"],
+                data_agendamento=data_formatada,
+                horario=hora_formatada,
+                barbeiro=agendamento["barbeiro"],
+                servicos=agendamento["servico"]
+            )
+            await send_email(
+                subject="Seu Agendamento foi Cancelado",
+                recipients=[agendamento["email"]],
+                body=body
+            )
+            return {"message": "Agendamento cancelado com sucesso e e-mail de notificação enviado!"}
+        except Exception as e:
+            print(f"Erro ao enviar e-mail de cancelamento: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Agendamento cancelado, mas erro ao enviar e-mail de notificação."
+            )
+    
+    return {"message": "Agendamento cancelado com sucesso!"}
