@@ -5,6 +5,8 @@ from typing import List, Union
 from config.database import get_db_pool
 from config.email import send_email
 from schemas.agendamento import AgendamentoCreate
+from datetime import date
+from schemas.agendamento import HorariosIndisponiveisResponse 
 
 agendamento_router = APIRouter(
     prefix="/agendamentos",
@@ -39,7 +41,7 @@ def format_email_body(
     """
     return mensagem
 
-@agendamento_router.post("/", status_code=status.HTTP_201_CREATED)
+@agendamento_router.post("/agendar", status_code=status.HTTP_201_CREATED)
 async def criar_agendamento(
     agendamento: AgendamentoCreate, 
     db_pool: aiomysql.Pool = Depends(get_db_pool)
@@ -118,7 +120,7 @@ def format_cancel_email_body(
     """
     return mensagem
 
-@agendamento_router.delete("/{id_agendamento}", status_code=status.HTTP_200_OK)
+@agendamento_router.delete("/cancelar-agendamento/{id_agendamento}", status_code=status.HTTP_200_OK)
 async def cancelar_agendamento(
     id_agendamento: int,
     db_pool: aiomysql.Pool = Depends(get_db_pool)
@@ -163,3 +165,30 @@ async def cancelar_agendamento(
             )
     
     return {"message": "Agendamento cancelado com sucesso!"}
+
+@agendamento_router.get(
+    "/horarios", 
+    response_model=HorariosIndisponiveisResponse
+)
+async def listar_horarios_indisponiveis(
+    data: date, 
+    barbeiro: str,
+    db_pool: aiomysql.Pool = Depends(get_db_pool)
+):
+    sql = "SELECT horario FROM agendamentos WHERE data_agendamento = %s AND barbeiro = %s"
+
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(sql, (data, barbeiro))
+                results = await cursor.fetchall()
+    except aiomysql.Error as err:
+        print(f"Erro ao buscar horários: {err}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao consultar os horários no banco de dados."
+        )
+
+    horarios_ocupados = [row[0] for row in results]
+    
+    return {"horariosIndisponiveis": horarios_ocupados}

@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from datetime import date, time
 from typing import Optional
 
-class Agendamento(BaseModel):
+class AgendamentoDB(BaseModel):
     id: int
     nome_cliente: str
     telefone: Optional[str]
